@@ -135,7 +135,13 @@ cd neurostage_pipeline
 cp .env.template .env
 ```
 
-Open `.env` in any text editor and fill in just the three required fields (`PIPELINE_BASE`, `DICOM_INPUT`, `SUBJECT_ID`) — see [Configure Your Run](#configure-your-run-env) for details. Then run:
+Open `.env` in any text editor, for example:
+
+```bash
+gedit .env &
+```
+
+fill in just the four required fields (`PIPELINE_BASE`, `DICOM_INPUT`, `SUBJECT_ID`, `MATLAB_COMPILER_RUNTIME`) — see [Configure Your Run](#configure-your-run-env) for details. Then run:
 
 ```bash
 ./run_pipeline.sh
