@@ -128,6 +128,12 @@ The only thing the pipeline genuinely cannot do for you is hand you a `license.t
 
 ## Quick Start (Recommended)
 
+First of all download a main-branch zip folder from https://github.com/EN4D2-Computational-Lab/NeuroStage_Pipeline.git or use following in your terminal if you have `git`:
+
+```bash
+git clone https://github.com/EN4D2-Computational-Lab/NeuroStage_Pipeline.git
+```
+
 This is the entire setup process for a brand-new machine that has nothing installed yet:
 
 ```bash
@@ -224,7 +230,7 @@ Copy the template:
 cp .env.template .env
 ```
 
-Open `.env` in any text editor. **You only need to fill in three fields:**
+Open `.env` in any text editor. **You only need to fill in four fields:**
 
 ```bash
 # 1. Absolute path to the neurostage_pipeline folder on your machine
@@ -235,6 +241,9 @@ DICOM_INPUT=/path/to/your/subject_dicoms
 
 # 3. Subject label (no "sub-" prefix)
 SUBJECT_ID=1004
+
+# 4. Absolute path to your MATLAB version
+MATLAB_COMPILER_RUNTIME=/path/to/MATLAB/R2025b/
 ```
 
 Every other path (FreeSurfer, FSL, HCP, Workbench, license, configs) is derived automatically from `PIPELINE_BASE`.
