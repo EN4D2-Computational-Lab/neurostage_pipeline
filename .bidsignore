@@ -1,0 +1,10 @@
+tmp_dcm2bids/
+tmp_dicom_*/
+*Processing/
+HCPpipelines/
+configs/
+freesurfer/
+workbench/
+*.log
+*.sh.e*
+*.sh.o*

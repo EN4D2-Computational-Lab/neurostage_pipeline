@@ -1,0 +1,111 @@
+{
+    "descriptions": [
+        {"datatype": "anat", "suffix": "T1w", "criteria": {
+    "SeriesDescription": {
+      "any": [
+          "*t1*", "*T1*", "*T1W*", "*t1w*",
+          "*MPRAGE*", "*mprage*", "*MPRage*", "*Mprage*",
+          "*BRAVO*", "*bravo*", "*Bravo*",
+          "*SPGR*", "*spgr*",
+          "*TFE*", "*tfe*", "*3DTFE*",
+          "*T1_*", "*_T1*", "*-T1*", "*T1-*",
+          "*sag*t1*", "*ax*t1*", "*cor*t1*",
+          "*3D*T1*", "*T1*3D*",
+          "*GR_IR*", "*FSPGR*", "*fspgr*",
+          "*IR-*", "*-IR*",
+          "*t1_mpr*", "*mpr_t1*",
+          "*structural*", "*STRUCTURAL*", "*MPR*", "*mpr*"
+        ]
+    },
+    "FlipAngle": {"lt": "20"}
+  }},
+        {
+  "datatype": "anat",
+  "suffix": "T2w",
+  "criteria": {
+    "SeriesDescription": {
+      "any": ["T2*", "*t2*", "*T2*", "*T2W*", "*t2w*",
+          "*TSE*", "*tse*", "*FSE*", "*fse*",
+          "*SPACE*", "*space*", "*Space*",
+          "*CUBE*", "*cube*", "*Cube*",
+          "*FRFSE*", "*frfse*",
+          "*T2_*", "*_T2*", "*-T2*", "*T2-*",
+          "*sag*t2*", "*ax*t2*", "*cor*t2*",
+          "*3D*T2*", "*T2*3D*",
+          "*t2_spc*", "*spc_t2*",
+          "*T2*DRIVE*", "*T2*drive*",
+          "*RESTORE*", "*restore*", "*MPR*", "*mpr*"]
+    },
+    "FlipAngle": {
+      "gt": "100"
+    },
+    "ScanningSequence": "*SE*"
+  }
+},
+        {
+  "datatype": "func",
+  "suffix": "bold",
+  "custom_entities": "task-rest",
+  "criteria": {
+    "SeriesDescription": {
+      "any": ["*bold*","*_se*", "*BOLD*", "*Bold*",
+"*fmri*", "*fMRI*", "*FMRI*", "*Fmri*",
+"*func*", "*FUNC*", "*Func*", "*functional*", "*FUNCTIONAL*",
+"*task*", "*TASK*", "*Task*",
+"*bold_*", "*_bold*",
+"*fmri_*", "*_fmri*"
+]
+    },
+    "FlipAngle": {
+      "btwe": ["30", "100"]
+    },
+    "ScanningSequence": "*EP*"
+  },
+  "sidecar_changes": {
+    "TaskName": "rest"
+  }
+},
+        {
+  "datatype": "dwi",
+  "suffix": "dwi",
+  "criteria": {
+    "SeriesDescription": {
+      "any": [
+          "*dwi*", "*DWI*", "*Dwi*",
+          "*dti*", "*DTI*", "*Dti*",
+          "*diff*", "*DIFF*", "*Diff*", "*diffusion*", "*DIFFUSION*",
+          "*dw*", "*DW*",
+          "*dwi_*", "*_dwi*", "*-dwi*", "*dwi-*",
+          "*dti_*", "*_dti*", "*-dti*", "*dti-*",
+          "*ep2d*diff*", "*ep_b*",
+          "*tensor*", "*TENSOR*",
+          "*HARDI*", "*hardi*"
+        ]
+    },
+    "FlipAngle": {
+      "btwe": ["30", "100"]
+    },
+    "ScanningSequence": "*EP*"
+  }
+},
+       {
+  "datatype": "perf",
+  "suffix": "asl",
+  "custom_entities": "task-rest",
+  "criteria": {
+    "SeriesDescription": {
+      "any": ["*pcasl*", "*PCASL*", "*Perfusion*", "*asl*", "*ASL*", "*Asl*",
+          "*arterial*spin*", "*ARTERIAL*SPIN*",
+          "*pcasl*", "*PCASL*", "*pCASL*", "*pASL*",
+          "*casl*", "*CASL*",
+          "*asl_*", "*_asl*",
+          "*perfusion*", "*PERFUSION*", "*relCBF*", "*RelCBF*", "*RELCBF*", "*rel_cbf*", "*relcbf*"]
+    },
+    "FlipAngle": {
+      "gt": "80"
+    },
+    "ScanningSequence": "*EP*"
+  }
+}
+]
+}
