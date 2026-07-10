@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 # =============================================================================
-# install_requirements.sh  — Run once on a new machine
-# Installs Python deps and pulls Docker images listed in .env
+# install_requirements.sh  — DEPRECATED, not called by run_pipeline.sh
+#
+# Its job (installing Python packages, pulling Docker images, checking disk
+# space) is now handled by scripts/bootstrap_check.sh, which run_pipeline.sh
+# calls automatically. install_dependencies.sh separately handles FreeSurfer/
+# FSL/HCPpipelines/Workbench/MCR. Keeping this file around alongside those is
+# confusing (two "installer" scripts with overlapping-but-different jobs) —
+# recommend deleting it. It's left runnable below only for anyone with an
+# existing workflow that still calls it directly.
 # =============================================================================
 set -euo pipefail
+echo "[install_requirements] NOTE: this script is deprecated and not used by"
+echo "  run_pipeline.sh. See the comment at the top of this file. Proceeding"
+echo "  anyway for backward compatibility..."
+echo ""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/.env"

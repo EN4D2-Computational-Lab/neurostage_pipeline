@@ -114,61 +114,80 @@ _bc_confirm() {
     [[ "$reply" =~ ^[Yy]$ ]]
 }
 
+# ── Free space check (in GB) at a given path's filesystem ────────────────────
+_bc_free_gb() {
+    local path="$1"
+    # Walk up to the nearest existing ancestor so this works even before
+    # $PIPELINE_BASE itself has been created yet.
+    while [[ ! -d "$path" && "$path" != "/" ]]; do
+        path="$(dirname "$path")"
+    done
+    df -Pk "$path" 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024/1024}'
+}
+
 # =============================================================================
-# _bootstrap_check — the main entry point. Call this once, right after .env
-# is sourced and BEFORE `set -euo pipefail`.
+# _bootstrap_check_fast — cheap, fast sanity checks that must pass BEFORE we
+# let install_dependencies.sh start pulling down ~15-20GB of tools. Nothing
+# in here downloads anything. Call this immediately after .env is sourced,
+# BEFORE install_dependencies.sh runs and BEFORE `set -euo pipefail`.
 #
-# Expects these to already be set (from .env): PIPELINE_BASE, FS_LICENSE,
-# FREESURFER_HOME, FSLDIR, HCPPIPEDIR, MRIQC_IMAGE, QSIPREP_IMAGE,
-# FMRIPREP_IMAGE, ASLPREP_IMAGE, FREESURFER_IMAGE, DICOM_INPUT,
-# DCM2BIDS_CONFIG.
+# Catching a missing Docker install, a missing python3, an un-edited .env
+# placeholder, or a full disk here means a first-time user finds out in
+# seconds instead of after a 20-minute download.
 # =============================================================================
-_bootstrap_check() {
+_bootstrap_check_fast() {
     BC_HARD_FAIL=0
 
     echo ""
     echo "════════════════════════════════════════════════════════════════"
-    echo "  NeuroStage — Checking your system before we start"
+    echo "  NeuroStage — Quick system check (before any downloads start)"
     echo "════════════════════════════════════════════════════════════════"
 
-    # ── 1. Bundled tools present (these ship in the download/clone) ─────────
-    _bc_info "Step 1/6 — Checking bundled tools (FreeSurfer, FSL, HCPpipelines, workbench)..."
-    local missing_bundle=0
-    for d in "$FREESURFER_HOME" "$FSLDIR" "$HCPPIPEDIR" "${WORKBENCH_DIR:-$PIPELINE_BASE/workbench}"; do
-        if [[ ! -d "$d" ]]; then
-            _bc_fail "Missing folder: $d"
-            missing_bundle=1
+    # ── A. Basic shell tools we rely on everywhere below ─────────────────────
+    _bc_info "Step 1/5 — Checking basic tools (curl, tar, unzip)..."
+    local missing_tools=()
+    for t in curl tar unzip; do
+        command -v "$t" &>/dev/null || missing_tools+=("$t")
+    done
+    if [[ "${#missing_tools[@]}" -gt 0 ]]; then
+        _bc_fail "Missing required command(s): ${missing_tools[*]}"
+        local fam; fam=$(_bc_os_family)
+        echo ""
+        case "$fam" in
+            debian) echo "    sudo apt update && sudo apt install -y ${missing_tools[*]}" ;;
+            rhel)   echo "    sudo dnf install -y ${missing_tools[*]}" ;;
+            macos)  echo "    brew install ${missing_tools[*]}" ;;
+            *)      echo "    Install these using your system's package manager." ;;
+        esac
+        echo ""
+    else
+        _bc_ok "curl, tar, and unzip found."
+    fi
+
+    # ── B. .env sanity — catch un-edited template placeholders early ────────
+    _bc_info "Step 2/5 — Checking that .env has been filled in..."
+    local placeholder_hit=0
+    for var in PIPELINE_BASE DICOM_INPUT DCM2BIDS_CONFIG FS_LICENSE FREESURFER_HOME FSLDIR HCPPIPEDIR; do
+        local val="${!var:-}"
+        if [[ -z "$val" ]]; then
+            _bc_fail "$var is not set in .env"
+            placeholder_hit=1
+        elif [[ "$val" == *"/path/to/"* || "$val" == *"CHANGE_ME"* || "$val" == *"<"*">"* || "$val" == "TODO"* ]]; then
+            _bc_fail "$var still looks like a template placeholder: $val"
+            placeholder_hit=1
         fi
     done
-    if [[ "$missing_bundle" -eq 1 ]]; then
+    if [[ "$placeholder_hit" -eq 1 ]]; then
         echo ""
-        echo "  These folders should have come bundled in your download/clone of"
-        echo "  the neurostage_pipeline folder. If they're missing, your download"
-        echo "  is incomplete — re-download or re-clone the full repository rather"
-        echo "  than just the scripts."
+        echo "  Open .env in a text editor and replace the flagged value(s) above"
+        echo "  with real paths on this machine, then run ./run_pipeline.sh again."
         echo ""
     else
-        _bc_ok "All bundled tool folders found."
+        _bc_ok ".env values look filled in."
     fi
 
-    # ── 2. FreeSurfer license ────────────────────────────────────────────────
-    _bc_info "Step 2/6 — Checking FreeSurfer license..."
-    if [[ ! -f "$FS_LICENSE" ]]; then
-        _bc_fail "license.txt not found at: $FS_LICENSE"
-        echo ""
-        echo "  This file is free but must be requested individually — it can't"
-        echo "  be bundled in the download. To get it:"
-        echo "    1. Go to: https://surfer.nmr.mgh.harvard.edu/registration.html"
-        echo "    2. Fill out the short form (instant, free, no approval wait)"
-        echo "    3. You'll receive a license.txt file by email"
-        echo "    4. Save that file as exactly: $FS_LICENSE"
-        echo ""
-    else
-        _bc_ok "FreeSurfer license found."
-    fi
-
-    # ── 3. Docker engine + daemon ────────────────────────────────────────────
-    _bc_info "Step 3/6 — Checking Docker..."
+    # ── C. Docker engine + daemon ─────────────────────────────────────────────
+    _bc_info "Step 3/5 — Checking Docker..."
     if ! command -v docker &>/dev/null; then
         _bc_fail "Docker is not installed."
         _bc_print_docker_install
@@ -186,8 +205,8 @@ _bootstrap_check() {
         _bc_ok "Docker is installed and running."
     fi
 
-    # ── 4. Python 3 + pip ────────────────────────────────────────────────────
-    _bc_info "Step 4/6 — Checking Python..."
+    # ── D. Python 3 + pip ──────────────────────────────────────────────────────
+    _bc_info "Step 4/5 — Checking Python..."
     if ! command -v python3 &>/dev/null; then
         _bc_fail "python3 is not installed."
         _bc_print_python_install
@@ -198,14 +217,88 @@ _bootstrap_check() {
         _bc_ok "python3 and pip found."
     fi
 
-    # If anything in steps 1-4 failed, there's no point asking about pip
-    # packages or pulling docker images yet — stop here with a clean list.
+    # ── E. Disk space — FreeSurfer + FSL + HCPpipelines + Workbench + MCR
+    #        run ~15-20GB combined; Docker images add more on top of that ────
+    _bc_info "Step 5/5 — Checking free disk space at PIPELINE_BASE..."
+    if [[ -n "${PIPELINE_BASE:-}" ]]; then
+        local free_gb; free_gb=$(_bc_free_gb "$PIPELINE_BASE")
+        if [[ -n "$free_gb" && "$free_gb" -lt 40 ]]; then
+            _bc_fail "Only ${free_gb}GB free near $PIPELINE_BASE. Recommend at least 40GB free before continuing (dependency downloads alone need ~15-20GB, plus room for Docker images and per-subject outputs)."
+        else
+            _bc_ok "${free_gb:-unknown}GB free — enough to proceed."
+        fi
+    fi
+
+    if [[ "$BC_HARD_FAIL" -eq 1 ]]; then
+        _bc_die
+    fi
+
+    echo ""
+    echo "  ✓ Quick checks passed. Proceeding to install/verify dependencies..."
+    echo ""
+}
+
+# =============================================================================
+# _bootstrap_check — the heavier checks. Call this once, AFTER
+# install_dependencies.sh has run and BEFORE `set -euo pipefail`.
+#
+# Expects these to already be set (from .env): PIPELINE_BASE, FS_LICENSE,
+# FREESURFER_HOME, FSLDIR, HCPPIPEDIR, MRIQC_IMAGE, QSIPREP_IMAGE,
+# FMRIPREP_IMAGE, ASLPREP_IMAGE, FREESURFER_IMAGE, DICOM_INPUT,
+# DCM2BIDS_CONFIG.
+# =============================================================================
+_bootstrap_check() {
+    BC_HARD_FAIL=0
+
+    echo ""
+    echo "════════════════════════════════════════════════════════════════"
+    echo "  NeuroStage — Checking your system before we start"
+    echo "════════════════════════════════════════════════════════════════"
+
+    # ── 1. Tool folders present (installed by install_dependencies.sh) ──────
+    _bc_info "Step 1/4 — Checking installed tools (FreeSurfer, FSL, HCPpipelines, workbench)..."
+    local missing_bundle=0
+    for d in "$FREESURFER_HOME" "$FSLDIR" "$HCPPIPEDIR" "${WORKBENCH_DIR:-$PIPELINE_BASE/workbench}"; do
+        if [[ ! -d "$d" ]]; then
+            _bc_fail "Missing folder: $d"
+            missing_bundle=1
+        fi
+    done
+    if [[ "$missing_bundle" -eq 1 ]]; then
+        echo ""
+        echo "  These folders are supposed to be installed automatically by"
+        echo "  install_dependencies.sh (they are NOT bundled in the GitHub"
+        echo "  download). This means that script did not complete successfully."
+        echo "  Scroll up to check for an earlier error, then try running it"
+        echo "  directly to see the full output:"
+        echo "    ./install_dependencies.sh"
+        echo ""
+    else
+        _bc_ok "All required tool folders found."
+    fi
+
+    # ── 2. FreeSurfer license ────────────────────────────────────────────────
+    _bc_info "Step 2/4 — Checking FreeSurfer license..."
+    if [[ ! -f "$FS_LICENSE" ]]; then
+        _bc_fail "license.txt not found at: $FS_LICENSE"
+        echo ""
+        echo "  This file is free but must be requested individually — it can't"
+        echo "  be bundled in the download. To get it:"
+        echo "    1. Go to: https://surfer.nmr.mgh.harvard.edu/registration.html"
+        echo "    2. Fill out the short form (instant, free, no approval wait)"
+        echo "    3. You'll receive a license.txt file by email"
+        echo "    4. Save that file as exactly: $FS_LICENSE"
+        echo ""
+    else
+        _bc_ok "FreeSurfer license found."
+    fi
+
     if [[ "$BC_HARD_FAIL" -eq 1 ]]; then
         _bc_die
     fi
 
     # ── 5. Required Python packages (ask before installing) ─────────────────
-    _bc_info "Step 5/6 — Checking required Python packages..."
+    _bc_info "Step 3/4 — Checking required Python packages..."
     local need_pkgs=()
     for mod_pkg in "dcm2bids:dcm2bids" "nibabel:nibabel" "pydicom:pydicom" "tqdm:tqdm" "colorama:colorama"; do
         local mod="${mod_pkg%%:*}" pkg="${mod_pkg##*:}"
@@ -238,14 +331,16 @@ _bootstrap_check() {
 
     # ── 6. Docker images (auto-pull silently, no prompt — bandwidth/time"
     #        cost only, not a destructive or ambiguous action) ───────────────
-    _bc_info "Step 6/6 — Checking required Docker images (will pull any that are missing)..."
-    local images=(
-        "${FREESURFER_IMAGE:-freesurfer/freesurfer:7.4.1}"
-        "${MRIQC_IMAGE}"
-        "${QSIPREP_IMAGE}"
-        "${FMRIPREP_IMAGE}"
-        "${ASLPREP_IMAGE}"
-    )
+    _bc_info "Step 4/4 — Checking required Docker images (will pull any that are missing)..."
+    local image_vars=(MRIQC_IMAGE QSIPREP_IMAGE FMRIPREP_IMAGE ASLPREP_IMAGE)
+    local images=("${FREESURFER_IMAGE:-freesurfer/freesurfer:7.4.1}")
+    for v in "${image_vars[@]}"; do
+        if [[ -z "${!v:-}" ]]; then
+            _bc_fail "$v is not set in .env — this image is required and cannot be skipped."
+        else
+            images+=("${!v}")
+        fi
+    done
     for img in "${images[@]}"; do
         [[ -z "$img" ]] && continue
         if docker image inspect "$img" &>/dev/null; then

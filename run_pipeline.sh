@@ -56,29 +56,52 @@ EOF
 done
 
 # ── Load env first (needed before anything else) ──────────────────────────────
-[[ -f "$SCRIPT_DIR/.env" ]] || { echo "ERROR: .env not found."; exit 1; }
+if [[ ! -f "$SCRIPT_DIR/.env" ]]; then
+    echo ""
+    echo "════════════════════════════════════════════════════════════════"
+    echo "  SETUP INCOMPLETE — .env file not found"
+    echo "════════════════════════════════════════════════════════════════"
+    echo "  NeuroStage needs a .env file with your paths and settings before"
+    echo "  it can run. To create one:"
+    echo "    1. Copy the template:   cp .env.template .env"
+    echo "    2. Open .env in a text editor and fill in the paths"
+    echo "    3. Run ./run_pipeline.sh again"
+    echo "════════════════════════════════════════════════════════════════"
+    exit 1
+fi
 source "$SCRIPT_DIR/.env"
+
+# ── Fast bootstrap check — runs BEFORE any heavy work (dependency downloads,
+# FreeSurfer env sourcing) and BEFORE strict mode, on purpose. Confirms basic
+# tools, Docker, Python, disk space, and .env sanity up front so a first-time
+# user finds out about a problem in seconds, not after a 20-minute download.
+source "$SCRIPT_DIR/scripts/bootstrap_check.sh"
+_bootstrap_check_fast
 
 # ── Source FreeSurfer env (must happen before set -euo pipefail) ──────────────
 unset SUBJECTS_DIR SESSIONS_DIR FSFAST_HOME MNI_DIR FIX_VERTEX_AREA
 export FS_FREESURFERENV_NO_OUTPUT=""
 export FMRI_ANALYSIS_DIR=""
-source "$FREESURFER_HOME/SetUpFreeSurfer.sh" || true
+source "$FREESURFER_HOME/SetUpFreeSurfer.sh" 2>/dev/null || true
 
 # Re-source .env to restore anything FreeSurfer clobbered
 source "$SCRIPT_DIR/.env"
 
-if [[ ! -x "${FREESURFER_HOME}/bin/recon-all" ]]; then
-    "${SCRIPT_DIR}/install_dependencies.sh"
+if ! "${SCRIPT_DIR}/install_dependencies.sh"; then
+    echo ""
+    echo "════════════════════════════════════════════════════════════════"
+    echo "  SETUP INCOMPLETE — install_dependencies.sh failed"
+    echo "════════════════════════════════════════════════════════════════"
+    echo "  Scroll up for the specific error above, fix it, then run"
+    echo "  ./run_pipeline.sh again. Nothing has been processed yet."
+    echo "════════════════════════════════════════════════════════════════"
+    exit 1
 fi
 
-# ── Bootstrap check — runs BEFORE strict mode on purpose. Verifies Docker,
-# Python, pip packages, bundled tool folders, license, and docker images are
-# all in place, printing exact fix instructions for anything missing. This
-# is what lets someone with zero terminal experience just run
-# ./run_pipeline.sh and be told precisely what to do next instead of seeing
-# a raw bash error. See scripts/bootstrap_check.sh for the actual checks.
-source "$SCRIPT_DIR/scripts/bootstrap_check.sh"
+# ── Full bootstrap check — runs after dependencies are installed. Verifies
+# the tool folders actually landed, the FreeSurfer license, required Python
+# packages, and required Docker images are all in place, printing exact fix
+# instructions for anything missing. See scripts/bootstrap_check.sh.
 _bootstrap_check
 
 # ── NOW enable strict mode ────────────────────────────────────────────────────

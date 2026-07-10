@@ -2,15 +2,17 @@
 # =============================================================================
 # NeuroStage — Dependency Installer
 #
-# Installs FreeSurfer, FSL, HCPPipelines, and Connectome Workbench into
-# $PIPELINE_BASE, pinned to the exact versions NeuroStage was validated on.
+# Installs FreeSurfer, FSL, HCPPipelines, Connectome Workbench, and the
+# MATLAB Compiler Runtime (MCR) into $PIPELINE_BASE, pinned to the exact
+# versions NeuroStage was validated on.
 #
 # Design goals:
 #   - Idempotent: safe to re-run. Skips anything already installed at the
 #     correct version.
 #   - Self-contained: everything lands under $PIPELINE_BASE, nothing touches
 #     system paths, so it plays nicely with .env pointing FREESURFER_HOME /
-#     FSLDIR / HCPPIPEDIR / CARET7DIR at these locations.
+#     FSLDIR / HCPPIPEDIR / CARET7DIR / MATLAB_COMPILER_RUNTIME at these
+#     locations.
 #   - Called automatically by run_pipeline.sh, but can also be run standalone:
 #       ./install_dependencies.sh
 # =============================================================================
@@ -44,6 +46,29 @@ VENDOR_MARKERS="${PIPELINE_BASE}/.vendor"
 mkdir -p "$VENDOR_MARKERS"
 
 # ---------------------------------------------------------------------------
+# 0b. Standalone-safe guard rails. run_pipeline.sh's bootstrap_check_fast
+#     already checks these, but this script documents itself as runnable on
+#     its own, so it must not assume that happened.
+# ---------------------------------------------------------------------------
+for _tool in curl tar unzip python3; do
+    if ! command -v "$_tool" &>/dev/null; then
+        echo "[install_dependencies] ERROR: required command '$_tool' not found."
+        echo "  Install it with your system's package manager, then re-run this script."
+        exit 1
+    fi
+done
+
+_free_gb=$(df -Pk "$PIPELINE_BASE" 2>/dev/null | awk 'NR==2 {printf "%d", $4/1024/1024}')
+if [[ -n "$_free_gb" && "$_free_gb" -lt 40 ]]; then
+    echo "[install_dependencies] ERROR: only ${_free_gb}GB free at $PIPELINE_BASE."
+    echo "  These downloads (FreeSurfer, FSL, HCPpipelines, Workbench, MCR) need"
+    echo "  roughly 15-20GB, plus headroom for Docker images and per-subject"
+    echo "  output. Free up space or point PIPELINE_BASE at a larger disk, then"
+    echo "  re-run this script."
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # 1. Pinned versions — the ONLY place version numbers should live
 #    (matched to what's actually validated on the UAB HPC build)
 # ---------------------------------------------------------------------------
@@ -62,6 +87,21 @@ HCPPIPELINES_REPO="https://github.com/Washington-University/HCPpipelines.git"
 WORKBENCH_VERSION="2.0.0"
 WORKBENCH_URL="https://github.com/Washington-University/workbench/releases/download/v${WORKBENCH_VERSION}/workbench-linux64-v${WORKBENCH_VERSION}.zip"
 
+# MATLAB Compiler Runtime (MCR) — free redistributable from MathWorks, no
+# license required. This is what runs HCPPipelines' *compiled* MATLAB
+# binaries. This is NOT full MATLAB — do not confuse the two.
+#
+# IMPORTANT: the MCR version MUST match the version the HCPPipelines/
+# FreeSurfer compiled binaries were built against, or compiled tools will
+# fail to launch at runtime. Verify this against your HCPpipelines build
+# before trusting the auto-install path. Update pattern confirmed against
+# MathWorks' public MCR download scheme as of this writing — if MathWorks
+# changes their URL layout, install_mcr() will fail loudly (curl -f) rather
+# than silently grabbing a bad file.
+MCR_VERSION="R2025b"
+MCR_UPDATE="0"
+MCR_URL="https://ssd.mathworks.com/supportfiles/downloads/${MCR_VERSION}/Release/${MCR_UPDATE}/deployment_files/installer/complete/glnxa64/MATLAB_Runtime_${MCR_VERSION}_Update_${MCR_UPDATE}_glnxa64.zip"
+
 # Where your pre-built HCP override files live (small, git-tracked)
 HCP_CUSTOM_FILES_DIR="${SCRIPT_DIR}/.hcpfiles"
 
@@ -79,6 +119,18 @@ already_installed() {
 mark_installed() {
     local marker="${VENDOR_MARKERS}/.$1_installed"
     echo "$2" > "$marker"
+}
+
+# Persist a KEY=VALUE into .env, replacing any existing line for that key.
+persist_env_var() {
+    local key="$1"
+    local value="$2"
+    if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+        sed -i.bak "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+    else
+        echo "${key}=${value}" >> "$ENV_FILE"
+    fi
+    rm -f "${ENV_FILE}.bak"
 }
 
 # ---------------------------------------------------------------------------
@@ -253,7 +305,121 @@ install_workbench() {
 }
 
 # ---------------------------------------------------------------------------
-# 7. Run all
+# 7. MATLAB Compiler Runtime (MCR)
+#
+#    Unlike full MATLAB, the MCR is a free redistributable with no license
+#    requirement, so — like FreeSurfer/FSL/Workbench above — we can just
+#    download and install it directly, no user action needed.
+#
+#    Detection order:
+#      1. MATLAB_COMPILER_RUNTIME already set in .env and points at a valid
+#         install -> skip.
+#      2. A previous NeuroStage-managed install exists under
+#         $PIPELINE_BASE/mcr -> skip (idempotent re-run).
+#      3. Otherwise -> download and install fresh, then write the resulting
+#         path back into .env automatically.
+# ---------------------------------------------------------------------------
+is_valid_mcr_path() {
+    local candidate="$1"
+    # A real MCR install root contains a version subdirectory with a
+    # runtime/glnxa64 folder inside it (e.g. <root>/R2025b/runtime/glnxa64).
+    [[ -n "$candidate" ]] && find "$candidate" -maxdepth 2 -type d -name "runtime" 2>/dev/null | grep -q .
+}
+
+detect_or_install_mcr() {
+    # 1. Already configured and valid?
+    if is_valid_mcr_path "${MATLAB_COMPILER_RUNTIME:-}"; then
+        log "MCR already configured at: $MATLAB_COMPILER_RUNTIME"
+        return
+    fi
+
+    # 2. Already installed by a previous run of this script?
+    if already_installed "mcr" "${MCR_VERSION}_Update_${MCR_UPDATE}" \
+       && is_valid_mcr_path "${PIPELINE_BASE}/mcr"; then
+        log "MCR ${MCR_VERSION} Update ${MCR_UPDATE} already installed — skipping."
+        MATLAB_COMPILER_RUNTIME="${PIPELINE_BASE}/mcr"
+        persist_env_var "MATLAB_COMPILER_RUNTIME" "$MATLAB_COMPILER_RUNTIME"
+        return
+    fi
+
+    log "MCR not found — installing ${MCR_VERSION} Update ${MCR_UPDATE} into ${PIPELINE_BASE}/mcr ..."
+    log "NOTE: this is a ~3-4GB download."
+
+    local tmp_zip="${PIPELINE_BASE}/.vendor/mcr-${MCR_VERSION}.zip"
+    local tmp_extract="${PIPELINE_BASE}/.vendor/mcr_extract_tmp"
+
+    if ! curl -fL --progress-bar -o "$tmp_zip" "$MCR_URL"; then
+        log "ERROR: failed to download MCR from:"
+        log "  $MCR_URL"
+        log "  MathWorks may have changed their download URL scheme, or"
+        log "  ${MCR_VERSION} Update ${MCR_UPDATE} may not exist. Check"
+        log "  https://www.mathworks.com/products/compiler/matlab-runtime.html"
+        log "  and set MCR_VERSION/MCR_UPDATE at the top of this script, or"
+        log "  set MATLAB_COMPILER_RUNTIME manually in .env if MCR is"
+        log "  already installed somewhere on this system."
+        return 1
+    fi
+
+    rm -rf "$tmp_extract"
+    mkdir -p "$tmp_extract"
+    unzip -q "$tmp_zip" -d "$tmp_extract"
+    rm -f "$tmp_zip"
+
+    # MathWorks ships an `install` binary that supports non-interactive mode
+    # via -mode silent -agreeToLicense yes. No FIK or license file needed —
+    # the runtime itself is unrestricted freeware.
+    rm -rf "${PIPELINE_BASE}/mcr"
+    mkdir -p "${PIPELINE_BASE}/mcr"
+
+    "${tmp_extract}/install" \
+        -mode silent \
+        -agreeToLicense yes \
+        -destinationFolder "${PIPELINE_BASE}/mcr"
+
+    rm -rf "$tmp_extract"
+
+    if ! is_valid_mcr_path "${PIPELINE_BASE}/mcr"; then
+        log "ERROR: MCR install completed but expected runtime folder not found"
+        log "  under ${PIPELINE_BASE}/mcr. Installation likely failed silently."
+        return 1
+    fi
+
+    MATLAB_COMPILER_RUNTIME="${PIPELINE_BASE}/mcr"
+    persist_env_var "MATLAB_COMPILER_RUNTIME" "$MATLAB_COMPILER_RUNTIME"
+    mark_installed "mcr" "${MCR_VERSION}_Update_${MCR_UPDATE}"
+    log "MCR ${MCR_VERSION} Update ${MCR_UPDATE} installed at $MATLAB_COMPILER_RUNTIME"
+}
+
+# Sanity-check that the installed/detected MCR is actually usable — confirms
+# the expected runtime/glnxa64 subfolder exists and has shared libraries in
+# it, which is what compiled HCP/FreeSurfer MATLAB binaries link against at
+# runtime. This does NOT run a MATLAB job — MCR has no interactive shell.
+verify_mcr() {
+    if [[ -z "${MATLAB_COMPILER_RUNTIME:-}" ]] || ! is_valid_mcr_path "$MATLAB_COMPILER_RUNTIME"; then
+        log "Skipping MCR verification — no valid MATLAB_COMPILER_RUNTIME."
+        return 1
+    fi
+
+    local runtime_dir
+    runtime_dir="$(find "$MATLAB_COMPILER_RUNTIME" -maxdepth 2 -type d -name "glnxa64" -path "*runtime*" | head -n1)"
+
+    if [[ -z "$runtime_dir" ]] || ! find "$runtime_dir" -maxdepth 1 -name "*.so*" 2>/dev/null | grep -q .; then
+        log "WARNING: MATLAB_COMPILER_RUNTIME is set but no shared libraries"
+        log "  found under it. Compiled MATLAB steps in HCPPipelines will"
+        log "  likely fail at runtime."
+        return 1
+    fi
+
+    log "MCR verified — runtime libraries found at: $runtime_dir"
+    log "  Reminder: compiled HCP/FreeSurfer MATLAB binaries must have been"
+    log "  built against ${MCR_VERSION} specifically, or they will fail to"
+    log "  launch even with a valid MCR present. Confirm this matches your"
+    log "  HCPPipelines build if you hit runtime errors."
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# 8. Run all
 # ---------------------------------------------------------------------------
 main() {
     log "Checking NeuroStage dependencies under: $PIPELINE_BASE"
@@ -261,6 +427,8 @@ main() {
     install_fsl
     install_hcppipelines
     install_workbench
+    detect_or_install_mcr || log "WARNING: MCR setup incomplete — see messages above."
+    verify_mcr || true   # don't hard-fail the whole pipeline on this
     log "All dependencies present. NeuroStage is ready to run."
 }
 
