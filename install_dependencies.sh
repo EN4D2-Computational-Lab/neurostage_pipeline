@@ -103,8 +103,8 @@ WORKBENCH_URL="www.humanconnectome.org/storage/app/media/workbench/workbench-lin
 # MathWorks' public MCR download scheme as of this writing — if MathWorks
 # changes their URL layout, install_mcr() will fail loudly (curl -f) rather
 # than silently grabbing a bad file.
-MCR_VERSION="R2025b"
-MCR_UPDATE="0"
+MCR_VERSION="R2025a"
+MCR_UPDATE="1"
 MCR_URL="https://ssd.mathworks.com/supportfiles/downloads/${MCR_VERSION}/Release/${MCR_UPDATE}/deployment_files/installer/complete/glnxa64/MATLAB_Runtime_${MCR_VERSION}_Update_${MCR_UPDATE}_glnxa64.zip"
 
 # Where your pre-built HCP override files live (small, git-tracked)
