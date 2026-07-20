@@ -72,8 +72,13 @@ fi
 # 1. Pinned versions — the ONLY place version numbers should live
 #    (matched to what's actually validated on the UAB HPC build)
 # ---------------------------------------------------------------------------
-FREESURFER_BUILD="freesurfer-linux-centos7_x86_64-7.4.1-20230613-7eb8460"
+
+# Change this:
+# FREESURFER_BUILD="freesurfer-linux-centos7_x86_64-7.4.1-20230613-7eb8460"
+
+# To this:
 FREESURFER_VERSION="7.4.1"
+FREESURFER_BUILD="freesurfer-linux-centos7_x86_64-${FREESURFER_VERSION}"
 FREESURFER_URL="https://surfer.nmr.mgh.harvard.edu/pub/dist/freesurfer/${FREESURFER_VERSION}/${FREESURFER_BUILD}.tar.gz"
 
 FSL_VERSION="6.0.7.4"
@@ -85,7 +90,7 @@ HCPPIPELINES_REPO="https://github.com/Washington-University/HCPpipelines.git"
 
 # Workbench: we only keep bin_linux64/ — no GUI, no other-OS binaries, no docs.
 WORKBENCH_VERSION="2.0.0"
-WORKBENCH_URL="https://github.com/Washington-University/workbench/releases/download/v${WORKBENCH_VERSION}/workbench-linux64-v${WORKBENCH_VERSION}.zip"
+WORKBENCH_URL="www.humanconnectome.org/storage/app/media/workbench/workbench-linux64-v${WORKBENCH_VERSION}.zip"
 
 # MATLAB Compiler Runtime (MCR) — free redistributable from MathWorks, no
 # license required. This is what runs HCPPipelines' *compiled* MATLAB
@@ -327,13 +332,28 @@ is_valid_mcr_path() {
 }
 
 detect_or_install_mcr() {
-    # 1. Already configured and valid?
+    # 1. Already configured and valid in .env?
     if is_valid_mcr_path "${MATLAB_COMPILER_RUNTIME:-}"; then
         log "MCR already configured at: $MATLAB_COMPILER_RUNTIME"
         return
     fi
 
-    # 2. Already installed by a previous run of this script?
+    # 1b. Check for a local system MATLAB installation before downloading anything
+    if [[ -d "/usr/local/MATLAB" ]]; then
+        log "Checking for local MATLAB installations under /usr/local/MATLAB ..."
+        local sys_matlab
+        # Finds directories like /usr/local/MATLAB/R2025b, sorts them to pick the newest version
+        sys_matlab="$(find /usr/local/MATLAB -maxdepth 2 -type d -name "R20*" 2>/dev/null | sort -V | tail -n1)"
+        
+        if is_valid_mcr_path "$sys_matlab"; then
+            log "Found system MATLAB installation at: $sys_matlab"
+            MATLAB_COMPILER_RUNTIME="$sys_matlab"
+            persist_env_var "MATLAB_COMPILER_RUNTIME" "$MATLAB_COMPILER_RUNTIME"
+            return
+        fi
+    fi
+
+    # 2. Already installed by a previous run of this script under PIPELINE_BASE?
     if already_installed "mcr" "${MCR_VERSION}_Update_${MCR_UPDATE}" \
        && is_valid_mcr_path "${PIPELINE_BASE}/mcr"; then
         log "MCR ${MCR_VERSION} Update ${MCR_UPDATE} already installed — skipping."
@@ -429,6 +449,23 @@ main() {
     install_workbench
     detect_or_install_mcr || log "WARNING: MCR setup incomplete — see messages above."
     verify_mcr || true   # don't hard-fail the whole pipeline on this
+    log "All dependencies present. NeuroStage is ready to run."
+    # -----------------------------------------------------------------------
+    # Print the resolved paths on successful completion
+    # -----------------------------------------------------------------------
+    echo ""
+    echo "========================================================================="
+    echo " NeuroStage Environment Summary"
+    echo "========================================================================="
+    echo " PIPELINE_BASE:             ${PIPELINE_BASE}"
+    echo " FREESURFER_HOME:           ${PIPELINE_BASE}/freesurfer"
+    echo " FSLDIR:                    ${PIPELINE_BASE}/fsl"
+    echo " HCPPIPEDIR:                ${PIPELINE_BASE}/HCPpipelines"
+    echo " CARET7DIR:                 ${PIPELINE_BASE}/workbench/bin_linux64"
+    echo " MATLAB_COMPILER_RUNTIME:   ${MATLAB_COMPILER_RUNTIME:-Not Configured}"
+    echo "========================================================================="
+    echo ""
+
     log "All dependencies present. NeuroStage is ready to run."
 }
 
